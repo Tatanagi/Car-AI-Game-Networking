@@ -1,4 +1,5 @@
 using UnityEngine;
+using TMPro;
 
 public class StopLight : MonoBehaviour
 {
@@ -9,11 +10,15 @@ public class StopLight : MonoBehaviour
     [Header("Current State")]
     public bool isGreen = true;
 
+    [Header("UI Display")]
+    public TMP_Text timerText;
+
     private float timer;
 
     private void Start()
     {
         timer = greenTime;
+        UpdateTimerDisplay();
     }
 
     private void Update()
@@ -34,6 +39,21 @@ public class StopLight : MonoBehaviour
                 timer = redTime;
                 Debug.Log("RED LIGHT");
             }
+        }
+
+        UpdateTimerDisplay();
+    }
+
+    private void UpdateTimerDisplay()
+    {
+        if (timerText != null)
+        {
+            // Show countdown (whole number)
+            int displayTime = Mathf.CeilToInt(timer);
+            timerText.text = displayTime.ToString();
+
+            // Change text color based on light state
+            timerText.color = isGreen ? Color.green : Color.red;
         }
     }
 }

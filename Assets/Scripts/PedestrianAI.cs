@@ -3,8 +3,7 @@ using UnityEngine;
 public class PedestrianAI : MonoBehaviour
 {
     [Header("Crossing Points")]
-    public Transform startPoint;
-    public Transform endPoint;
+    public Transform[] crossingPoints;   // ← Array: Start, Mid1, Mid2, ..., End
 
     [Header("Traffic Lights")]
     public StopLight[] trafficLights;
@@ -13,124 +12,161 @@ public class PedestrianAI : MonoBehaviour
     public float walkSpeed = 3.5f;
     public float waitTimeAtEnd = 3f;
 
-    private bool isCrossing = false;
-    private bool atStart = true;
-    private float waitTimer = 0f;
-
+    private int currentTargetIndex = 0;
     private Vector3 targetPosition;
+
+    private enum CrossingState
+    {
+        WaitingToStart,
+        Moving,
+        WaitingAtIntermediate,
+        Finished
+    }
+
+    private CrossingState currentState = CrossingState.WaitingToStart;
+
+    private float waitTimer = 0f;
+    private bool waitingForNextRed = false;
 
     private void Start()
     {
-        if (startPoint != null)
+        if (crossingPoints != null && crossingPoints.Length > 0)
         {
-            transform.position = startPoint.position;
+            transform.position = crossingPoints[0].position;
+            currentTargetIndex = 0;
         }
     }
 
     private void Update()
     {
-        // Safety check
-        if (startPoint == null || endPoint == null)
+        if (crossingPoints == null || crossingPoints.Length < 2)
             return;
 
-        bool isSafeToCross = IsSafeToCross();
+        bool isRed = IsRedLight();
 
-        if (!isCrossing)
+        switch (currentState)
         {
-            if (atStart)
-            {
-                if (isSafeToCross)
+            case CrossingState.WaitingToStart:
+                if (isRed)
                 {
-                    StartCrossing();
+                    StartMovingToNextPoint();
                 }
-            }
-            else
-            {
+                break;
+
+            case CrossingState.Moving:
+                MoveToTarget();
+                if (ReachedTarget())
+                {
+                    ArriveAtPoint();
+                }
+                break;
+
+            case CrossingState.WaitingAtIntermediate:
+                // At intermediate point: wait for green then next red
+                if (!waitingForNextRed && !isRed) // Light turned green
+                {
+                    waitingForNextRed = true;
+                }
+                else if (waitingForNextRed && isRed)
+                {
+                    StartMovingToNextPoint();
+                }
+                break;
+
+            case CrossingState.Finished:
                 waitTimer += Time.deltaTime;
                 if (waitTimer >= waitTimeAtEnd)
                 {
-                    ReturnToStart();
+                    // Optional: despawn, return to start, or loop
+                    Debug.Log($"<color=gray>[Pedestrian] Finished waiting at end ({gameObject.name})</color>");
                 }
-            }
-        }
-        else
-        {
-            // Move towards target
-            transform.position = Vector3.MoveTowards(
-                transform.position,
-                targetPosition,
-                walkSpeed * Time.deltaTime
-            );
-
-            // Check if reached destination
-            if (Vector3.Distance(transform.position, targetPosition) <= 0.2f)
-            {
-                FinishCrossing();
-            }
+                break;
         }
     }
 
-    private bool IsSafeToCross()
+    private bool IsRedLight()
     {
         if (trafficLights == null || trafficLights.Length == 0)
-            return true; // No lights = always cross
+            return true;
 
         foreach (var light in trafficLights)
         {
             if (light != null && !light.isGreen)
-                return true; // At least one red light = safe to cross
+                return true;
         }
-
         return false;
     }
 
-    private void StartCrossing()
+    private void StartMovingToNextPoint()
     {
-        isCrossing = true;
-        atStart = false;
-        waitTimer = 0f;
-        targetPosition = endPoint.position;
+        if (currentTargetIndex >= crossingPoints.Length - 1)
+            return;
 
-        Debug.Log($"<color=cyan>[Pedestrian] Crossing to end point ({gameObject.name})</color>");
+        currentTargetIndex++;
+        targetPosition = crossingPoints[currentTargetIndex].position;
+        currentState = CrossingState.Moving;
+        waitingForNextRed = false;
+
+        Debug.Log($"<color=cyan>[Pedestrian] Moving to point {currentTargetIndex} ({gameObject.name})</color>");
     }
 
-    private void FinishCrossing()
+    private void ArriveAtPoint()
     {
-        isCrossing = false;
-        transform.position = targetPosition; // Snap to exact position
-        Debug.Log($"<color=green>[Pedestrian] Reached destination ({gameObject.name})</color>");
+        transform.position = targetPosition;
+
+        if (currentTargetIndex >= crossingPoints.Length - 1)
+        {
+            // Final destination
+            currentState = CrossingState.Finished;
+            waitTimer = 0f;
+            Debug.Log($"<color=green>[Pedestrian] Reached final destination ({gameObject.name})</color>");
+        }
+        else
+        {
+            // Intermediate point
+            currentState = CrossingState.WaitingAtIntermediate;
+            waitingForNextRed = false;
+            Debug.Log($"<color=orange>[Pedestrian] Arrived at intermediate point {currentTargetIndex} ({gameObject.name})</color>");
+        }
     }
 
-    private void ReturnToStart()
+    private void MoveToTarget()
     {
-        isCrossing = true;
-        atStart = true;
-        waitTimer = 0f;
-        targetPosition = startPoint.position;
-
-        Debug.Log($"<color=cyan>[Pedestrian] Returning to start ({gameObject.name})</color>");
+        transform.position = Vector3.MoveTowards(
+            transform.position,
+            targetPosition,
+            walkSpeed * Time.deltaTime
+        );
     }
 
-    public void AssignReferences(Transform start, Transform end, StopLight[] lights)
+    private bool ReachedTarget()
     {
-        startPoint = start;
-        endPoint = end;
+        return Vector3.Distance(transform.position, targetPosition) <= 0.2f;
+    }
+
+    /// <summary>
+    /// Assign multiple points and traffic lights
+    /// </summary>
+    public void AssignReferences(Transform[] points, StopLight[] lights)
+    {
+        crossingPoints = points;
         trafficLights = lights;
 
-        if (start != null)
+        if (points != null && points.Length > 0)
         {
-            transform.position = start.position;
+            transform.position = points[0].position;
         }
 
-        atStart = true;
-        isCrossing = false;
+        currentTargetIndex = 0;
+        currentState = CrossingState.WaitingToStart;
         waitTimer = 0f;
+        waitingForNextRed = false;
 
-        Debug.Log($"<color=lime>[Pedestrian] References assigned successfully ({gameObject.name})</color>");
+        Debug.Log($"<color=lime>[Pedestrian] Assigned {points?.Length} crossing points ({gameObject.name})</color>");
     }
 
     private void OnDestroy()
     {
-        isCrossing = false;
+        // Cleanup if needed
     }
 }
